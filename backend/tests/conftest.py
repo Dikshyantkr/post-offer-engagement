@@ -26,7 +26,11 @@ import os
 # runs the real FastAPI lifespan, which would otherwise start APScheduler and
 # let a background thread fire real sweeps — creating follow-up actions no
 # test asked for, spending provider quota, and tripping the row-leak guard.
-os.environ.setdefault("RUN_SCHEDULER", "false")
+#
+# Assigned, not setdefault: docker-compose sets RUN_SCHEDULER=true on the api
+# container, and a test run must never inherit the deployment's scheduler
+# setting. The assert below is what caught that.
+os.environ["RUN_SCHEDULER"] = "false"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

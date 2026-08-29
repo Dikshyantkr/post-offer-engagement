@@ -20,9 +20,21 @@ services:
     build: ./backend
     restart: unless-stopped
     env_file:
-      - .env
+      # Optional: .env is gitignored, so a fresh clone does not have one and
+      # `docker compose up` would otherwise fail before Docker starts anything.
+      # Without it the app still runs — every AI call returns its deterministic
+      # fallback with was_fallback=true. Copy .env.example to .env and add a
+      # GEMINI_API_KEY to enable the AI layer.
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/post_offer_engagement
+      # Defaults so the container is fully configured with no .env present.
+      # Anything set in .env wins over these.
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3-flash-preview}
+      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      RUN_SCHEDULER: ${RUN_SCHEDULER:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       db:
         condition: service_healthy
@@ -31,6 +43,10 @@ services:
     command: sh -c "python seed.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
   web:
+    # Module 7. Behind a profile until ./frontend exists, so `docker compose up`
+    # brings up db + api cleanly instead of failing on a missing build context.
+    # Once the frontend lands, drop this line to put it back in the default set.
+    profiles: ["frontend"]
     build: ./frontend
     restart: unless-stopped
     environment:

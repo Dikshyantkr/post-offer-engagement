@@ -90,6 +90,19 @@ class BlockerSignal(str, Enum):
     CRITICAL = "critical"  # counter_offer or notice_period blocker
 
 
+class CandidateSort(str, Enum):
+    """Sort orders GET /candidates accepts.
+
+    RISK is what turns the list into the triage tool the product is for —
+    "the five worth a phone call this morning" — ordering by final risk band
+    and then by risk_score_base within it. JOINING_DATE stays the default so
+    the plain list keeps reading as a calendar.
+    """
+
+    JOINING_DATE = "joining_date"
+    RISK = "risk"
+
+
 class ValidationStatus(str, Enum):
     VALID = "valid"
     REPAIRED = "repaired"

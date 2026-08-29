@@ -1,8 +1,14 @@
-"""Manual trigger for the nightly sweep — the demo entry point.
+"""Manual trigger for the engagement sweep — the demo entry point.
 
-The same `run_engagement_sweep` the scheduler calls, so what a reviewer sees
-here is exactly what runs at 02:00 UTC, not a separate demo path that could
-drift from it.
+Calls the same `run_engagement_sweep` the scheduler calls, so the automation
+rules a reviewer exercises here are the ones that run at 02:00 UTC.
+
+One deliberate difference: the scheduled job rescores every pending candidate
+(risk_service.recompute_all) before sweeping, and this endpoint does not. Risk
+scoring is already exposed on its own at POST /risk/recompute, and folding it
+in here would make a "run the automation" button quietly rewrite every risk
+badge in the database — a surprising amount of state change for one click. Run
+the two in that order to reproduce a full nightly pass.
 """
 
 from __future__ import annotations

@@ -16,6 +16,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.config import settings
 from app.db import Base, SessionLocal, engine
 from app.enums import (
     BlockerCategory,
@@ -29,7 +30,7 @@ from app.enums import (
     StageStatus,
 )
 from app.models import Candidate, CandidateStage, Interaction, JourneyStage, Recruiter
-from app.services import risk_service
+from app.services import automation_service, risk_service
 from app.services.stage_scheduler import compute_stage_schedule
 from app.services.stage_service import resolve_engagement_status
 
@@ -749,6 +750,33 @@ def apply_stage_stalls(db: Session) -> list[tuple[str, int, int]]:
     return stalled
 
 
+def run_demo_sweep(db: Session) -> dict | None:
+    """Run one automation sweep so a fresh boot has something to look at.
+
+    Two panels are otherwise empty on first load: the action queue, and the
+    candidate detail's latest AI analysis. Nothing fills either until the
+    nightly job runs at 02:00 UTC, so without this a reviewer's first
+    impression of Modules 5 and 6 is two blank panels.
+
+    Returns None, and does nothing, when GEMINI_API_KEY is unset. The sweep
+    would still succeed — the engine falls back deterministically and every
+    candidate still gets an action — but every drafted message would be the
+    template, which makes the AI layer look like it does nothing. An empty
+    queue is a more honest first impression than a queue full of fallbacks.
+
+    Costs roughly 40 seconds against the live API, and the container's command
+    runs the seed before uvicorn, so `docker compose up` is that much slower to
+    answer. Worth it: it is the difference between a demo that shows the
+    product and one that shows an empty table.
+
+    Idempotent for free — the sweep's own 24h window means a container restart
+    inside a day adds nothing.
+    """
+    if not settings.gemini_api_key:
+        return None
+    return automation_service.run_engagement_sweep(db, actor="seed").as_dict()
+
+
 def main() -> None:
     Base.metadata.create_all(bind=engine)
 
@@ -791,8 +819,21 @@ def main() -> None:
               f"distribution {risk['distribution']}.")
         print(f"Stage stalls seeded for {len(stalled)} candidates "
               f"(feeds the stage_stall automation rule and pipeline drop-off):")
-        for name, count, worst_overdue in stalled:
-            print(f"  - {name}: {count} stage(s) pending, worst {worst_overdue} days overdue")
+        for name, stage_count, worst_overdue in stalled:
+            print(f"  - {name}: {stage_count} stage(s) pending, worst {worst_overdue} days overdue")
+
+        # Last, so it sweeps the finished dataset — after the stalls exist and
+        # after risk has been scored, exactly as the nightly job does.
+        sweep = run_demo_sweep(db)
+        if sweep is None:
+            print("Demo sweep skipped: GEMINI_API_KEY is not set, so the action queue starts "
+                  "empty. Set a key in .env and POST /api/v1/automation/run to populate it.")
+        else:
+            rules = sweep["rules"]
+            print(f"Demo automation sweep: {sweep['actions_created']} follow-up actions "
+                  f"({rules['imminent_silence']['actions_created']} imminent_silence, "
+                  f"{rules['stage_stall']['actions_created']} stage_stall), "
+                  f"{sweep['ai_calls']} AI calls, {sweep['ai_fallbacks']} fallbacks.")
 
 
 if __name__ == "__main__":

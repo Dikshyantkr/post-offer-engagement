@@ -18,13 +18,14 @@ batched job feeding a work queue. Documented in the README's scaling section.
 from __future__ import annotations
 
 import logging
+from datetime import date
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
 from app.db import SessionLocal
-from app.services import automation_service
+from app.services import automation_service, risk_service
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +33,36 @@ SWEEP_JOB_ID = "nightly_engagement_sweep"
 
 
 def run_nightly_sweep() -> None:
-    """The job body. Runs on the scheduler's thread, so it opens its own
-    session — the request-scoped one from get_db does not exist here."""
-    logger.info("Nightly engagement sweep triggered by the scheduler")
+    """The job body: rescore every pending candidate, then run both automation
+    rules. Runs on the scheduler's thread, so it opens its own session — the
+    request-scoped one from get_db does not exist here.
+
+    The recompute has to come first, and it is not optional. Risk is otherwise
+    only recalculated when an interaction is written, and a candidate who has
+    gone silent by definition generates no interactions — so the badge for
+    exactly the candidate this product exists to catch is the one that goes
+    stale. Measured against the seeded data, 11 of 40 pending candidates sit
+    below their true rule floor after three days without this pass.
+
+    Ordering matters for a second reason: the sweep's own decisions read
+    candidate.risk_level, so scoring first means the actions it files carry
+    today's risk rather than whatever was last written.
+    """
+    logger.info("Nightly maintenance triggered by the scheduler")
     with SessionLocal() as db:
+        try:
+            risk = risk_service.recompute_all(db, date.today(), actor="scheduler")
+            logger.info(
+                "Nightly risk recompute: %d scanned, %d level changes, distribution %s",
+                risk["scanned"],
+                risk["level_changed"],
+                risk["distribution"],
+            )
+        except Exception:
+            # Do not abandon the sweep because scoring failed. Stale badges are
+            # bad; a silent candidate with no action filed at all is worse.
+            logger.exception("Nightly risk recompute failed; continuing to the sweep")
+
         try:
             automation_service.run_engagement_sweep(db, actor="scheduler")
         except Exception:
@@ -52,7 +79,7 @@ def build_scheduler() -> BackgroundScheduler:
         run_nightly_sweep,
         CronTrigger(hour=settings.sweep_hour, minute=settings.sweep_minute, timezone="UTC"),
         id=SWEEP_JOB_ID,
-        name="Nightly engagement sweep",
+        name="Nightly risk recompute + engagement sweep",
         replace_existing=True,
         # A sweep that overruns must not have a second copy started on top of
         # it: two concurrent sweeps would race the idempotency check.

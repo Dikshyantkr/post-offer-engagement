@@ -45,7 +45,11 @@ BAND_RANGES: dict[RiskLevel, tuple[float, float]] = {
     RiskLevel.HIGH: (70.0, 100.0),
 }
 
-_BAND_RANK = {RiskLevel.LOW: 0, RiskLevel.MEDIUM: 1, RiskLevel.HIGH: 2}
+# Public: candidate_service orders the dashboard by this, and a second
+# definition of "which band outranks which" living in the query layer is
+# exactly the kind of drift that makes a sorted list disagree with the
+# badges it is sorting.
+BAND_RANK = {RiskLevel.LOW: 0, RiskLevel.MEDIUM: 1, RiskLevel.HIGH: 2}
 
 # --- Blocker signal ----------------------------------------------------------
 BLOCKER_SIGNAL_RANK = {
@@ -190,7 +194,7 @@ def compute_base_risk(
     # never move a candidate across a band boundary on their own — only the
     # floor does that, deliberately and visibly.
     floor_level = BLOCKER_FLOOR[blocker_signal]
-    if _BAND_RANK[floor_level] > _BAND_RANK[level]:
+    if BAND_RANK[floor_level] > BAND_RANK[level]:
         level = floor_level
 
     raw = min(
@@ -398,13 +402,13 @@ def rule_floor_for_candidate(db: Session, candidate: Candidate, today: date) -> 
 
 
 def is_higher(level: RiskLevel, than: RiskLevel) -> bool:
-    """Band comparison, so callers outside this module never need _BAND_RANK.
+    """Band comparison, so callers outside this module never need BAND_RANK.
 
     This is the whole of `final = max(base, ai_assessment)`: Module 5 asks
     whether the AI's level is higher than the rule floor and only then writes
     it. There is no path that lets an AI answer lower the level.
     """
-    return _BAND_RANK[level] > _BAND_RANK[than]
+    return BAND_RANK[level] > BAND_RANK[than]
 
 
 def _apply(
@@ -433,7 +437,7 @@ def _apply(
     # CLAUDE.md: final = max(base, ai_assessment) — the AI may only raise.
     # Without this, a nightly recompute would silently erase a higher AI
     # assessment once Module 5 lands.
-    if candidate.risk_source == RiskSource.AI and _BAND_RANK[candidate.risk_level] > _BAND_RANK[level]:
+    if candidate.risk_source == RiskSource.AI and BAND_RANK[candidate.risk_level] > BAND_RANK[level]:
         return "ai_higher"
 
     if candidate.risk_level == level and candidate.risk_source == RiskSource.RULE:

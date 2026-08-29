@@ -12,10 +12,10 @@ from __future__ import annotations
 import uuid
 from datetime import date, timedelta
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.enums import EngagementStatus, FollowUpStatus, RiskLevel, RiskSource
+from app.enums import CandidateSort, EngagementStatus, FollowUpStatus, RiskLevel, RiskSource
 from app.errors import ConfigurationError, NotFoundError
 from app.models import Candidate, CandidateStage, JourneyStage, Recruiter
 from app.schemas import (
@@ -25,8 +25,40 @@ from app.schemas import (
     CandidateStageResponse,
     CandidateUpdate,
 )
-from app.services import audit_service, stage_service
+from app.services import audit_service, risk_service, stage_service
 from app.services.stage_scheduler import compute_stage_schedule
+
+
+def _risk_ordering() -> list:
+    """Order by risk band first, then severity within the band.
+
+    Two keys, not one, because risk_score_base alone is the wrong sort. The
+    score is the *rule floor*, and an AI assessment can raise a candidate's
+    band above it — Sana Qureshi sits at a rule floor of 50.1 (MEDIUM) while
+    her final level is HIGH, because the counter-offer signal is in a WhatsApp
+    message the rules cannot read. Sorting on the score alone would file her
+    below every rule-flagged candidate, which is exactly backwards: she is the
+    one worth calling first.
+
+    So: final band descending (what the recruiter sees on the badge), then
+    risk_score_base descending to rank within the band (what the score exists
+    for), then joining_date to break ties toward whoever joins soonest.
+
+    The band ranking comes from risk_service.BAND_RANK rather than the
+    database enum's declaration order, so "which band outranks which" has one
+    definition.
+
+    Built from explicit `==` comparisons rather than case(BAND_RANK,
+    value=...): RiskLevel subclasses str, so the shorthand renders its keys as
+    the enum *values* ("low"), while SQLAlchemy stores enum *names* ("LOW").
+    Comparing against the column routes each literal through the column's own
+    Enum type and binds the name.
+    """
+    band = case(
+        *[(Candidate.risk_level == level, rank) for level, rank in risk_service.BAND_RANK.items()],
+        else_=0,
+    )
+    return [band.desc(), Candidate.risk_score_base.desc(), Candidate.joining_date.asc()]
 
 
 def list_candidates(
@@ -41,6 +73,7 @@ def list_candidates(
     engagement_status: EngagementStatus | None = None,
     search: str | None = None,
     joining_within_days: int | None = None,
+    sort: CandidateSort = CandidateSort.JOINING_DATE,
 ) -> tuple[list[Candidate], int]:
     stmt = select(Candidate)
 
@@ -82,7 +115,15 @@ def list_candidates(
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 
-    stmt = stmt.order_by(Candidate.joining_date).limit(limit).offset(offset)
+    ordering = (
+        _risk_ordering()
+        if sort == CandidateSort.RISK
+        # id as a final tiebreaker: without it, candidates sharing a joining
+        # date can come back in any order, and two pages of the same list can
+        # then show the same candidate twice or skip one.
+        else [Candidate.joining_date.asc(), Candidate.id.asc()]
+    )
+    stmt = stmt.order_by(*ordering).limit(limit).offset(offset)
     items = list(db.scalars(stmt).all())
     return items, total
 

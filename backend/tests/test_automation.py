@@ -873,3 +873,57 @@ def test_start_scheduler_returns_none_when_disabled():
     from app.scheduler import start_scheduler
 
     assert start_scheduler() is None
+
+
+def test_the_nightly_job_rescores_risk_before_sweeping(monkeypatch):
+    """Order is the whole point of the pairing.
+
+    Risk is otherwise recalculated only when an interaction is written, and a
+    candidate who has gone silent generates none — so the badge for exactly the
+    candidate this product exists to catch is the one that goes stale. Scoring
+    first also means the actions the sweep files carry today's risk rather than
+    whatever was last written.
+
+    Both calls are stubbed: this asserts the wiring, without running a real
+    sweep against the seeded database.
+    """
+    from app import scheduler
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        scheduler.risk_service,
+        "recompute_all",
+        lambda *a, **k: calls.append("recompute")
+        or {"scanned": 0, "level_changed": 0, "distribution": {}},
+    )
+    monkeypatch.setattr(
+        scheduler.automation_service,
+        "run_engagement_sweep",
+        lambda *a, **k: calls.append("sweep"),
+    )
+
+    scheduler.run_nightly_sweep()
+
+    assert calls == ["recompute", "sweep"]
+
+
+def test_the_sweep_still_runs_when_the_recompute_fails(monkeypatch):
+    """Stale badges are bad; a silent candidate with no action filed at all is
+    worse. A scoring failure must not cost the sweep."""
+    from app import scheduler
+
+    calls: list[str] = []
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("scoring blew up")
+
+    monkeypatch.setattr(scheduler.risk_service, "recompute_all", _boom)
+    monkeypatch.setattr(
+        scheduler.automation_service,
+        "run_engagement_sweep",
+        lambda *a, **k: calls.append("sweep"),
+    )
+
+    scheduler.run_nightly_sweep()
+
+    assert calls == ["sweep"]

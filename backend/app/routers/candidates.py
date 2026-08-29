@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.enums import EngagementStatus, RiskLevel
+from app.enums import CandidateSort, EngagementStatus, RiskLevel
 from app.routers import get_actor
 from app.schemas import (
     CandidateCreate,
@@ -31,6 +31,13 @@ def list_candidates(
     engagement_status: EngagementStatus | None = None,
     search: str | None = None,
     joining_within_days: int | None = Query(None, ge=0),
+    sort: CandidateSort = Query(
+        CandidateSort.JOINING_DATE,
+        description=(
+            "joining_date (default) or risk. 'risk' orders by final risk band, "
+            "then by risk_score_base within the band — the triage view."
+        ),
+    ),
     db: Session = Depends(get_db),
 ) -> CandidateListResponse:
     items, total = candidate_service.list_candidates(
@@ -44,6 +51,7 @@ def list_candidates(
         engagement_status=engagement_status,
         search=search,
         joining_within_days=joining_within_days,
+        sort=sort,
     )
     return CandidateListResponse(
         items=[CandidateResponse.model_validate(c) for c in items],

@@ -9,10 +9,18 @@ from __future__ import annotations
 import uuid
 from datetime import date, timedelta
 
+import pytest
 from sqlalchemy import select
 
 from app.db import SessionLocal
-from app.models import AuditLog
+from app.enums import (
+    FollowUpPriority,
+    FollowUpSource,
+    FollowUpStatus,
+    RiskLevel,
+    RiskSource,
+)
+from app.models import AuditLog, Candidate, FollowUpAction
 from tests.helpers import API, candidate_payload
 
 # ---------------------------------------------------------------------------
@@ -474,3 +482,291 @@ def test_candidates_list_pagination_envelope(client):
 def test_candidates_list_limit_over_max_returns_422(client):
     resp = client.get(f"{API}/candidates", params={"limit": 101})
     assert resp.status_code == 422, resp.text
+
+
+# ---------------------------------------------------------------------------
+# GET /candidates?sort=risk — the triage view
+#
+# The product is "40 pending joiners turned into the five worth a phone call
+# this morning". That list is unbuildable while the only ordering is by date.
+# ---------------------------------------------------------------------------
+
+_BAND_ORDER = {"high": 0, "medium": 1, "low": 2}
+
+
+def _listing(client, **params) -> list[dict]:
+    resp = client.get(f"{API}/candidates", params={"limit": 100, **params})
+    assert resp.status_code == 200, resp.text
+    return resp.json()["items"]
+
+
+def test_default_sort_is_still_joining_date(client):
+    dates = [c["joining_date"] for c in _listing(client)]
+    assert dates == sorted(dates), "the default listing must keep reading as a calendar"
+
+
+def test_sort_risk_orders_by_band_then_score(client):
+    items = _listing(client, sort="risk")
+    keys = [(_BAND_ORDER[c["risk_level"]], -c["risk_score_base"]) for c in items]
+    assert keys == sorted(keys)
+
+
+def test_sort_risk_puts_an_ai_raised_candidate_above_a_higher_scoring_rule_candidate(
+    client, make_candidate
+):
+    """The reason the sort is two keys and not just risk_score_base.
+
+    risk_score_base is the RULE floor. An AI assessment can raise a candidate's
+    band above it, so the candidate whose counter-offer signal is only visible
+    in a WhatsApp message carries a MEDIUM-band score and a HIGH badge. Sorting
+    on the score alone would file her below every rule-flagged candidate —
+    exactly backwards, since she is the one worth calling first.
+    """
+    ai_raised = make_candidate(
+        offer_date=(date.today() - timedelta(days=10)).isoformat(),
+        joining_date=(date.today() + timedelta(days=40)).isoformat(),
+    )
+    rule_high = make_candidate(
+        offer_date=(date.today() - timedelta(days=10)).isoformat(),
+        joining_date=(date.today() + timedelta(days=40)).isoformat(),
+    )
+    with SessionLocal() as db:
+        raised = db.get(Candidate, uuid.UUID(ai_raised["id"]))
+        raised.risk_level, raised.risk_source, raised.risk_score_base = (
+            RiskLevel.HIGH,
+            RiskSource.AI,
+            50.1,  # a MEDIUM-band floor
+        )
+        plain = db.get(Candidate, uuid.UUID(rule_high["id"]))
+        plain.risk_level, plain.risk_source, plain.risk_score_base = (
+            RiskLevel.MEDIUM,
+            RiskSource.RULE,
+            68.0,  # a higher score, but a lower band
+        )
+        db.commit()
+
+    order = [c["id"] for c in _listing(client, sort="risk")]
+    assert order.index(ai_raised["id"]) < order.index(rule_high["id"])
+
+
+def test_sort_risk_respects_filters_and_the_pagination_envelope(client):
+    body = client.get(
+        f"{API}/candidates", params={"sort": "risk", "risk_level": "high", "limit": 5}
+    ).json()
+
+    assert set(body.keys()) == {"items", "total", "limit", "offset"}
+    assert all(c["risk_level"] == "high" for c in body["items"])
+    scores = [c["risk_score_base"] for c in body["items"]]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_sort_risk_paginates_without_repeating_or_skipping(client):
+    first = [c["id"] for c in _listing(client, sort="risk", limit=10, offset=0)]
+    second = [c["id"] for c in _listing(client, sort="risk", limit=10, offset=10)]
+
+    assert len(first) == 10
+    assert not set(first) & set(second), "a stable sort must not repeat rows across pages"
+
+
+def test_unknown_sort_value_returns_422(client):
+    resp = client.get(f"{API}/candidates", params={"sort": "name"})
+
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "validation_error"
+
+
+# ---------------------------------------------------------------------------
+# PATCH /follow-up-actions/{id}
+#
+# Module 7's action queue closes actions through this endpoint, and it owns
+# state beyond the field it is handed: completed_at is set when an action is
+# resolved and cleared when it is reopened. Nothing else in the app writes that
+# column, so if this is wrong the queue silently loses its record of when work
+# was actually done.
+# ---------------------------------------------------------------------------
+
+
+def _make_action(candidate_id: str, **overrides) -> str:
+    """Insert a follow-up action directly.
+
+    Deliberately not routed through the automation sweep: these tests are about
+    this endpoint's own state transitions, and going through the sweep would
+    drag an LLM provider and two automation rules into a test that depends on
+    neither. Cleaned up by make_candidate's teardown, which deletes
+    follow_up_actions by candidate_id.
+    """
+    fields = {
+        "candidate_id": uuid.UUID(candidate_id),
+        "title": "Call about the notice period",
+        "description": "Seeded by a test.",
+        "due_date": date.today(),
+        "priority": FollowUpPriority.HIGH,
+        "status": FollowUpStatus.OPEN,
+        "source": FollowUpSource.MANUAL,
+    }
+    fields.update(overrides)
+    with SessionLocal() as db:
+        action = FollowUpAction(**fields)
+        db.add(action)
+        db.commit()
+        return str(action.id)
+
+
+def _patch_action(client, action_id: str, **payload):
+    return client.patch(f"{API}/follow-up-actions/{action_id}", json=payload)
+
+
+def _db_action(action_id: str) -> FollowUpAction:
+    with SessionLocal() as db:
+        return db.get(FollowUpAction, uuid.UUID(action_id))
+
+
+@pytest.mark.parametrize("resolved_status", ["done", "dismissed"])
+def test_resolving_an_action_stamps_completed_at(client, make_candidate, resolved_status):
+    """Both resolutions are terminal and both need a timestamp — dismissing an
+    action is a decision someone made at a moment, not an absence of one."""
+    candidate = make_candidate()
+    action_id = _make_action(candidate["id"])
+    assert _db_action(action_id).completed_at is None
+
+    resp = _patch_action(client, action_id, status=resolved_status)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == resolved_status
+    assert _db_action(action_id).completed_at is not None
+
+
+def test_reopening_an_action_clears_completed_at(client, make_candidate):
+    """Otherwise a reopened action carries a completion time for work that is
+    demonstrably not complete, and any 'closed this week' figure built on that
+    column is wrong."""
+    candidate = make_candidate()
+    action_id = _make_action(candidate["id"])
+    _patch_action(client, action_id, status="done")
+    assert _db_action(action_id).completed_at is not None
+
+    resp = _patch_action(client, action_id, status="open")
+
+    assert resp.status_code == 200, resp.text
+    assert _db_action(action_id).completed_at is None
+
+
+def test_editing_other_fields_leaves_completed_at_untouched(client, make_candidate):
+    """completed_at moves only on a status change. Re-prioritising a finished
+    action must not restamp when it was finished."""
+    candidate = make_candidate()
+    action_id = _make_action(candidate["id"])
+    _patch_action(client, action_id, status="done")
+    stamped = _db_action(action_id).completed_at
+
+    resp = _patch_action(client, action_id, priority="urgent", title="Renamed")
+
+    assert resp.status_code == 200, resp.text
+    row = _db_action(action_id)
+    assert row.priority == FollowUpPriority.URGENT
+    assert row.title == "Renamed"
+    assert row.completed_at == stamped
+    assert row.status == FollowUpStatus.DONE
+
+
+def test_patch_updates_every_editable_field(client, make_candidate):
+    candidate = make_candidate()
+    action_id = _make_action(candidate["id"])
+    due = (date.today() + timedelta(days=3)).isoformat()
+
+    resp = _patch_action(
+        client,
+        action_id,
+        title="Escalate to the hiring manager",
+        description="Relocation still unresolved.",
+        due_date=due,
+        priority="urgent",
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["title"] == "Escalate to the hiring manager"
+    assert body["description"] == "Relocation still unresolved."
+    assert body["due_date"] == due
+    assert body["priority"] == "urgent"
+
+
+def test_patch_leaves_untouched_fields_alone(client, make_candidate):
+    """It is a partial update: fields absent from the body keep their values,
+    including the ones this endpoint cannot edit at all."""
+    candidate = make_candidate()
+    action_id = _make_action(
+        candidate["id"], generated_message="Hi there,", rule_key="imminent_silence"
+    )
+
+    _patch_action(client, action_id, priority="low")
+
+    row = _db_action(action_id)
+    assert row.priority == FollowUpPriority.LOW
+    assert row.title == "Call about the notice period"
+    assert row.description == "Seeded by a test."
+    assert row.generated_message == "Hi there,", "the drafted message is not editable here"
+    assert row.rule_key == "imminent_silence", "nor is the rule that created it"
+    assert row.source == FollowUpSource.MANUAL
+
+
+def test_empty_patch_is_a_no_op(client, make_candidate):
+    candidate = make_candidate()
+    action_id = _make_action(candidate["id"])
+    before = _db_action(action_id)
+
+    resp = _patch_action(client, action_id)
+
+    assert resp.status_code == 200, resp.text
+    after = _db_action(action_id)
+    assert (after.title, after.status, after.completed_at) == (
+        before.title,
+        before.status,
+        before.completed_at,
+    )
+
+
+def test_patch_unknown_action_returns_404_envelope(client):
+    resp = _patch_action(client, str(uuid.uuid4()), status="done")
+
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "not_found"
+
+
+def test_patch_invalid_status_returns_422(client, make_candidate):
+    candidate = make_candidate()
+    action_id = _make_action(candidate["id"])
+
+    resp = _patch_action(client, action_id, status="completed")
+
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "validation_error"
+
+
+@pytest.mark.parametrize("field", ["title", "priority", "status"])
+def test_explicit_null_for_a_required_field_returns_422(client, make_candidate, field):
+    """A NOT NULL column must fail validation, not surface as a raw
+    IntegrityError from the database."""
+    candidate = make_candidate()
+    action_id = _make_action(candidate["id"])
+
+    resp = _patch_action(client, action_id, **{field: None})
+
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "validation_error"
+
+
+def test_a_resolved_action_leaves_the_open_queue(client, make_candidate):
+    """What the queue actually depends on: the status filter and this endpoint
+    agreeing, so a closed action stops being served."""
+    candidate = make_candidate()
+    action_id = _make_action(candidate["id"])
+
+    def _open_ids() -> set[str]:
+        resp = client.get(f"{API}/follow-up-actions", params={"status": "open", "limit": 100})
+        assert resp.status_code == 200, resp.text
+        return {a["id"] for a in resp.json()["items"]}
+
+    assert action_id in _open_ids()
+    _patch_action(client, action_id, status="done")
+    assert action_id not in _open_ids()
