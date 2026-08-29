@@ -300,7 +300,129 @@ HIGH_RISK_CANDIDATES = [
         ],
         "blocker_category": BlockerCategory.COMPENSATION,
     },
+    {
+        "name": "Aarav Sharma",
+        "role": "Software Engineer II",
+        "location": "Bengaluru",
+        "recruiter_email": "devraj.singh@company.com",
+        "notice_days": 60,
+        "days_to_joining": 12,
+        "risk_score_base": 70,
+        "notes": "Hedging around the money math out loud — hasn't said no, but hasn't committed either. Keep an eye before the notice window closes.",
+        "interactions": [
+            ("outbound", "whatsapp", -25, "hi aarav, congrats again on the offer! sharing the onboarding checklist below, let us know if anything's unclear."),
+            ("inbound", "whatsapp", -8,
+             "hii sorry been a bit slow this week, just going back and forth doing some math on the move — "
+             "rent + everything here vs there. nothing decided just yet, will loop back once i've actually "
+             "sat down and worked through it properly"),
+            ("outbound", "whatsapp", -3, "no worries aarav, take your time — happy to hop on a call if it helps to talk through anything on our end."),
+        ],
+        "blocker_category": BlockerCategory.COMPENSATION,
+    },
+    {
+        "name": "Arnav Mishra",
+        "role": "Product Manager",
+        "location": "Gurugram",
+        "recruiter_email": "ananya.rao@company.com",
+        "notice_days": 90,
+        "days_to_joining": 30,
+        "risk_score_base": 68,
+        "notes": "Quietly unsure about what the role actually involves day-to-day. Worth a clarifying call before he second-guesses further.",
+        "interactions": [
+            ("outbound", "email", -20, "hi arnav, sharing the role brief and some docs from the team ahead of your start date."),
+            ("inbound", "email", -6,
+             "hey, went through everything, mostly fine. just a bit confused on what the day to day actually "
+             "looks like, some of it reads a little different from what came up in the interviews but could "
+             "just be me reading too much into it. not urgent, just flagging"),
+        ],
+        "blocker_category": BlockerCategory.ROLE_SCOPE,
+    },
+    {
+        "name": "Ishaan Reddy",
+        "role": "Data Analyst",
+        "location": "Pune",
+        "recruiter_email": "karan.mehta@company.com",
+        "notice_days": 30,
+        "days_to_joining": 7,
+        "risk_score_base": 66,
+        "notes": "Family isn't fully on board with the move. Give him room but don't let this go unchecked.",
+        "interactions": [
+            ("inbound", "whatsapp", -5,
+             "hey sorry for going a bit quiet, some stuff going on at home right now, parents aren't fully on "
+             "board with me moving cities at the moment. still working through it on my end, nothing major "
+             "just need a bit of time"),
+            ("outbound", "whatsapp", -4, "totally understand ishaan, no pressure at all — just let us know whenever you're ready to talk, we're not going anywhere."),
+        ],
+        "blocker_category": BlockerCategory.PERSONAL,
+    },
+    {
+        "name": "Kavita Joshi",
+        "role": "Engineering Manager",
+        "location": "Hyderabad",
+        "recruiter_email": "meera.iyer@company.com",
+        "notice_days": 60,
+        "days_to_joining": 16,
+        "risk_score_base": 77,
+        "notes": "Text replies read fine on the surface — the real hesitation only came out on a call. Trust the call note over the chat history here.",
+        "interactions": [
+            ("outbound", "whatsapp", -30, "hi kavita, welcome aboard! sharing a few documents to kick off the onboarding process."),
+            ("inbound", "whatsapp", -21, "yeah should be fine, will keep you posted"),
+            ("outbound", "call", -4,
+             "Called since she'd gone quiet for a couple weeks. On the phone she mentioned she's 'still "
+             "weighing a couple of things' before fully committing — wouldn't say more than that, but didn't "
+             "sound settled either."),
+        ],
+        "blocker_category": BlockerCategory.COMPENSATION,
+        "call_recruiter_read": RecruiterRead.UNSURE,
+        "call_date_confirmed": False,
+    },
+    {
+        "name": "Neelam Bose",
+        "role": "UX Designer",
+        "location": "Remote",
+        "recruiter_email": "priya.nair@company.com",
+        "notice_days": 90,
+        "days_to_joining": 22,
+        "risk_score_base": 81,
+        "notes": "Was engaged early, went quiet after the manager intro. Call didn't get much more out of her either — flag for a second, more direct conversation.",
+        "interactions": [
+            ("outbound", "email", -40, "hi neelam, excited to have you on the team! sharing the welcome documents to get things started."),
+            ("inbound", "email", -38, "thank you so much! this all looks great, will get the signed copies back to you by tomorrow"),
+            ("outbound", "email", -14, "hi neelam, just checking in ahead of the manager intro call next week — let us know if the timing works."),
+            ("outbound", "call", -3,
+             "Reached her by phone after two weeks of silence. She was polite but distracted, said she's "
+             "'still figuring a few things out' before confirming anything — didn't want to get into "
+             "specifics on the call."),
+        ],
+        "blocker_category": BlockerCategory.NONE,
+        "call_recruiter_read": RecruiterRead.WORRIED,
+        "call_date_confirmed": False,
+    },
+    {
+        "name": "Yash Patel",
+        "role": "DevOps Engineer",
+        "location": "Bengaluru",
+        "recruiter_email": "farhan.sheikh@company.com",
+        "notice_days": 30,
+        "days_to_joining": 9,
+        "risk_score_base": 72,
+        "notes": "Replies have been getting shorter each time we check in. Nothing said outright, but the trend itself is the signal.",
+        "interactions": [
+            ("outbound", "whatsapp", -19, "hi yash, congrats again on the offer! sharing the onboarding checklist, let us know if you have questions."),
+            ("inbound", "whatsapp", -17, "thanks so much! will go through everything this week, looks pretty straightforward so far"),
+            ("outbound", "whatsapp", -10, "hey yash, just checking — how did the manager intro call go on your end?"),
+            ("inbound", "whatsapp", -9, "yeah it was fine"),
+            ("outbound", "whatsapp", -3, "hi yash, excited to have you joining soon! anything you need from us before the start date?"),
+            ("inbound", "whatsapp", -2, "nope all good"),
+        ],
+        "blocker_category": BlockerCategory.NONE,
+    },
 ]
+
+# Names above generated by the routine index-based generator, before they were
+# hand-written with real narratives. Skipped in _generate_routine_candidate so
+# they aren't created a second time under a different email.
+ROUTINE_INDEX_SKIP = {0, 5, 8, 22, 35, 39}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -550,11 +672,18 @@ def _generate_routine_candidate(
     lower_bound = offer_date
     span_days = max((upper_bound - lower_bound).days, 0)
 
-    offsets = sorted(random.randint(0, span_days) for _ in range(interaction_count)) if span_days > 0 else [0] * interaction_count
+    # Sample distinct (day, hour) slots so two interactions can never land on
+    # the exact same occurred_at — that's what previously produced literal
+    # duplicate interaction rows when span_days was small relative to the
+    # candidate's interaction count.
+    hours = range(9, 18)
+    all_slots = [(day, hour) for day in range(span_days + 1) for hour in hours]
+    slots = sorted(random.sample(all_slots, k=min(interaction_count, len(all_slots))))
+
     last_occurred: datetime | None = None
-    for i, offset in enumerate(offsets):
+    for i, (offset, hour) in enumerate(slots):
         occurred_day = lower_bound + timedelta(days=offset)
-        occurred_at = _dt(occurred_day, hour=random.randint(9, 17))
+        occurred_at = _dt(occurred_day, hour=hour)
         direction = InteractionDirection.OUTBOUND if i % 2 == 0 else InteractionDirection.INBOUND
         channel = random.choice(list(InteractionChannel))
         template = random.choice(OUTBOUND_TEMPLATES if direction == InteractionDirection.OUTBOUND else INBOUND_TEMPLATES)
@@ -595,8 +724,10 @@ def main() -> None:
         db.commit()
 
         routine_count = 0
-        target_routine = 45  # 9 hand-written + 45 generated = 54 total, comfortably over 50
+        target_routine = 45  # 15 hand-written + 39 generated (6 indices reassigned to hand-written) = 54 total
         for i in range(target_routine):
+            if i in ROUTINE_INDEX_SKIP:
+                continue
             _generate_routine_candidate(db, i, recruiters, journey_stages)
             routine_count += 1
         db.commit()
