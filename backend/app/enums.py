@@ -79,6 +79,13 @@ class ValidationStatus(str, Enum):
     FAILED = "failed"
 
 
+class FollowUpPriority(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    URGENT = "urgent"
+
+
 class FollowUpStatus(str, Enum):
     OPEN = "open"
     DONE = "done"

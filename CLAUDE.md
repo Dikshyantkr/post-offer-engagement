@@ -118,7 +118,8 @@ latency_ms, was_fallback, created_at`
 `id, candidate_id, title, description, due_date, priority, status, source,
 generated_message, rule_key, created_at, completed_at`
 
-- `status` enum: `open, done, dismissed`; `source` enum: `automation, ai, manual`
+- `priority` enum: `low, medium, high, urgent`; `status` enum: `open, done,
+  dismissed`; `source` enum: `automation, ai, manual`
 
 **audit_log**
 `id, entity_type, entity_id, action, actor, before (JSONB), after (JSONB),

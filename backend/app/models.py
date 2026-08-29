@@ -11,6 +11,7 @@ from app.enums import (
     BlockerCategory,
     EngagementStatus,
     FinalOutcome,
+    FollowUpPriority,
     FollowUpSource,
     FollowUpStatus,
     InteractionChannel,
@@ -180,7 +181,7 @@ class FollowUpAction(TimestampMixin, Base):
     title: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     due_date: Mapped[date | None] = mapped_column(Date)
-    priority: Mapped[str] = mapped_column(Text, nullable=False)
+    priority: Mapped[FollowUpPriority] = mapped_column(nullable=False)
     status: Mapped[FollowUpStatus] = mapped_column(nullable=False, default=FollowUpStatus.OPEN)
     source: Mapped[FollowUpSource] = mapped_column(nullable=False)
     generated_message: Mapped[str | None] = mapped_column(Text)
