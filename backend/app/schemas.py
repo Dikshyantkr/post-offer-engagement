@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
+from app.ai.contracts import DraftedMessage, InteractionSummary, NextAction, RiskAssessment
 from app.enums import (
     BlockerCategory,
     EngagementStatus,
@@ -324,6 +326,98 @@ class RiskRecomputeResponse(BaseModel):
     skipped_hr_override: int
     skipped_ai_higher: int
     distribution: dict[str, int]
+
+
+# ---------------------------------------------------------------------------
+# AI service (Module 5)
+#
+# Every AI response is {meta, <payload>}: the contract the model produced,
+# plus how it was produced. `meta` is not diagnostics — was_fallback and
+# validation_status decide whether the UI presents an answer as an AI reading
+# or as "the provider was down, here is what the rules alone can tell you",
+# and a UI that cannot tell those apart will eventually show a recruiter a
+# rule floor labelled as an AI insight.
+# ---------------------------------------------------------------------------
+
+
+class AIAnalysisMeta(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    analysis_id: uuid.UUID
+    analysis_type: str
+    model_name: str
+    prompt_version: str
+    validation_status: ValidationStatus
+    was_fallback: bool
+    latency_ms: int
+    confidence: float
+    created_at: datetime
+
+
+class RiskApplicationResponse(BaseModel):
+    """How the AI's level interacted with the rule floor. `final = max(base, ai)`
+    made visible, so the UI can show the badge and its provenance together."""
+
+    rule_floor_level: RiskLevel
+    rule_floor_score: float
+    ai_level: RiskLevel
+    final_level: RiskLevel
+    risk_source: RiskSource
+    raised_by_ai: bool
+    applied: bool
+    note: str
+
+
+class AssessRiskResponse(BaseModel):
+    meta: AIAnalysisMeta
+    assessment: RiskAssessment
+    risk: RiskApplicationResponse
+
+
+class SummarizeResponse(BaseModel):
+    meta: AIAnalysisMeta
+    summary: InteractionSummary
+
+
+class RecommendActionResponse(BaseModel):
+    meta: AIAnalysisMeta
+    recommendation: NextAction
+
+
+class DraftMessageRequest(BaseModel):
+    channel: Literal["email", "whatsapp"]
+    intent: str = Field(min_length=1, max_length=500)
+    tone: Literal["warm", "formal", "casual"] = "warm"
+
+
+class DraftMessageResponse(BaseModel):
+    meta: AIAnalysisMeta
+    draft: DraftedMessage
+    # Anything the guardrails stripped, shown rather than silently dropped: a
+    # recruiter about to send this should know the model tried to promise
+    # something and was stopped.
+    guardrails_removed: list[str]
+
+
+class AIOverrideRequest(BaseModel):
+    """HR disagrees with the AI. Either target may be set, or both."""
+
+    risk_level: RiskLevel | None = None
+    recommendation_verdict: Literal["accepted", "rejected"] | None = None
+    reason: str = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def _at_least_one_target(self) -> "AIOverrideRequest":
+        if self.risk_level is None and self.recommendation_verdict is None:
+            raise ValueError(
+                "an override must set risk_level, recommendation_verdict, or both"
+            )
+        return self
+
+
+class AIOverrideResponse(BaseModel):
+    candidate: "CandidateResponse"
+    recorded: list[str]
 
 
 # ---------------------------------------------------------------------------

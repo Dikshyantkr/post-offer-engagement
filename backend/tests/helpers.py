@@ -39,8 +39,10 @@ def row_counts() -> dict[str, int]:
 def purge_candidates(candidate_ids: list[str]) -> None:
     """Delete test-created candidates and everything hanging off them.
 
-    audit_log has no foreign key, so its rows are matched on entity_id for
-    both the candidates themselves and their candidate_stages rows.
+    audit_log has no foreign key, so its rows are matched on entity_id for the
+    candidates themselves, their candidate_stages rows, and their ai_analyses
+    rows — an AI recommendation override is audited against the analysis it
+    disagreed with, not against the candidate.
     """
     if not candidate_ids:
         return
@@ -50,7 +52,10 @@ def purge_candidates(candidate_ids: list[str]) -> None:
         stage_ids = list(
             db.scalars(select(CandidateStage.id).where(CandidateStage.candidate_id.in_(ids)))
         )
-        db.execute(delete(AuditLog).where(AuditLog.entity_id.in_(ids + stage_ids)))
+        analysis_ids = list(
+            db.scalars(select(AIAnalysis.id).where(AIAnalysis.candidate_id.in_(ids)))
+        )
+        db.execute(delete(AuditLog).where(AuditLog.entity_id.in_(ids + stage_ids + analysis_ids)))
         db.execute(delete(Interaction).where(Interaction.candidate_id.in_(ids)))
         db.execute(delete(CandidateStage).where(CandidateStage.candidate_id.in_(ids)))
         db.execute(delete(AIAnalysis).where(AIAnalysis.candidate_id.in_(ids)))

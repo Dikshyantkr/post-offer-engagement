@@ -19,6 +19,7 @@ of their messages and may RAISE the level; it can never lower it.
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 
 from sqlalchemy import select
@@ -300,7 +301,7 @@ def _stronger(a: BlockerSignal, b: BlockerSignal) -> BlockerSignal:
     return a if BLOCKER_SIGNAL_RANK[a] >= BLOCKER_SIGNAL_RANK[b] else b
 
 
-def _recent_interactions_cutoff(today: date) -> datetime:
+def recent_interactions_cutoff(today: date) -> datetime:
     """Coarse SQL prefilter bound. Midnight UTC of the cutoff date, so it can
     never exclude an interaction that resolve_blocker_signal would keep."""
     return datetime.combine(
@@ -319,6 +320,88 @@ def _max_stage_overdue_days(stages: list[CandidateStage], today: date) -> int:
     return max(overdue, default=0)
 
 
+@dataclass(frozen=True)
+class RuleFloor:
+    """The deterministic rule result for one candidate, with the inputs that
+    produced it.
+
+    The inputs travel with the result because two other places need them and
+    should not each re-derive them: the Module 5 prompt builder, which puts
+    "silent for 11 days" in front of the model as context, and the Module 5
+    fallback, which has to explain a risk level with no LLM available.
+    """
+
+    score: float
+    level: RiskLevel
+    days_to_joining: int
+    days_since_contact: int
+    max_stage_overdue_days: int
+    blocker_signal: BlockerSignal
+
+
+def rule_floor(
+    candidate: Candidate,
+    stages: list[CandidateStage],
+    interactions: list[Interaction],
+    today: date,
+) -> RuleFloor:
+    """Score a candidate against the rules without touching the database or
+    the candidate record. The single place the three rule inputs are derived
+    from ORM objects."""
+    days_to_joining = (candidate.joining_date - today).days
+    days_since_contact = _days_since_contact(candidate, today)
+    overdue = _max_stage_overdue_days(stages, today)
+    blocker_signal = resolve_blocker_signal(interactions, today)
+
+    score, level = compute_base_risk(
+        days_to_joining=days_to_joining,
+        days_since_contact=days_since_contact,
+        max_stage_overdue_days=overdue,
+        blocker_signal=blocker_signal,
+    )
+    return RuleFloor(
+        score=score,
+        level=level,
+        days_to_joining=days_to_joining,
+        days_since_contact=days_since_contact,
+        max_stage_overdue_days=overdue,
+        blocker_signal=blocker_signal,
+    )
+
+
+def _load_rule_inputs(
+    db: Session, candidate: Candidate, today: date
+) -> tuple[list[CandidateStage], list[Interaction]]:
+    stages = list(
+        db.scalars(select(CandidateStage).where(CandidateStage.candidate_id == candidate.id))
+    )
+    interactions = list(
+        db.scalars(
+            select(Interaction).where(
+                Interaction.candidate_id == candidate.id,
+                Interaction.occurred_at >= recent_interactions_cutoff(today),
+            )
+        )
+    )
+    return stages, interactions
+
+
+def rule_floor_for_candidate(db: Session, candidate: Candidate, today: date) -> RuleFloor:
+    """rule_floor(), loading the candidate's stages and recent interactions."""
+    stages, interactions = _load_rule_inputs(db, candidate, today)
+    return rule_floor(candidate, stages, interactions, today)
+
+
+def is_higher(level: RiskLevel, than: RiskLevel) -> bool:
+    """Band comparison, so callers outside this module never need _BAND_RANK.
+
+    This is the whole of `final = max(base, ai_assessment)`: Module 5 asks
+    whether the AI's level is higher than the rule floor and only then writes
+    it. There is no path that lets an AI answer lower the level.
+    """
+    return _BAND_RANK[level] > _BAND_RANK[than]
+
+
 def _apply(
     db: Session,
     candidate: Candidate,
@@ -332,12 +415,8 @@ def _apply(
 
     Returns one of: "changed", "unchanged", "hr_override", "ai_higher".
     """
-    score, level = compute_base_risk(
-        days_to_joining=(candidate.joining_date - today).days,
-        days_since_contact=_days_since_contact(candidate, today),
-        max_stage_overdue_days=_max_stage_overdue_days(stages, today),
-        blocker_signal=resolve_blocker_signal(interactions, today),
-    )
+    floor = rule_floor(candidate, stages, interactions, today)
+    score, level = floor.score, floor.level
 
     # The rule floor is always recorded, even when it does not win — the UI
     # shows it beside the final badge so an override is visibly an override.
@@ -388,17 +467,7 @@ def recompute_for_candidate(
     if candidate.final_outcome != FinalOutcome.PENDING:
         return False
 
-    stages = list(
-        db.scalars(select(CandidateStage).where(CandidateStage.candidate_id == candidate.id))
-    )
-    interactions = list(
-        db.scalars(
-            select(Interaction).where(
-                Interaction.candidate_id == candidate.id,
-                Interaction.occurred_at >= _recent_interactions_cutoff(today),
-            )
-        )
-    )
+    stages, interactions = _load_rule_inputs(db, candidate, today)
     return _apply(db, candidate, stages, interactions, today, actor) == "changed"
 
 
@@ -437,7 +506,7 @@ def recompute_all(
         for interaction in db.scalars(
             select(Interaction).where(
                 Interaction.candidate_id.in_(candidate_ids),
-                Interaction.occurred_at >= _recent_interactions_cutoff(today),
+                Interaction.occurred_at >= recent_interactions_cutoff(today),
             )
         ):
             interactions_by_candidate[interaction.candidate_id].append(interaction)

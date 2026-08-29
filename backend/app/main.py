@@ -6,7 +6,15 @@ from fastapi import FastAPI
 from app import models  # noqa: F401  (registers models on Base.metadata)
 from app.db import Base, engine
 from app.errors import register_exception_handlers
-from app.routers import candidates, follow_up_actions, interactions, recruiters, risk, stages
+from app.routers import (
+    ai,
+    candidates,
+    follow_up_actions,
+    interactions,
+    recruiters,
+    risk,
+    stages,
+)
 
 
 @asynccontextmanager
@@ -25,6 +33,7 @@ app.include_router(interactions.router, prefix=API_V1_PREFIX)
 app.include_router(recruiters.router, prefix=API_V1_PREFIX)
 app.include_router(follow_up_actions.router, prefix=API_V1_PREFIX)
 app.include_router(risk.router, prefix=API_V1_PREFIX)
+app.include_router(ai.router, prefix=API_V1_PREFIX)
 
 
 @app.get("/health")
