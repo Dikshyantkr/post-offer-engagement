@@ -117,7 +117,7 @@ def compute_base_risk(
         already passed while the candidate is still pending.
     days_since_contact
         Days since last_interaction_at. For a never-contacted candidate the
-        caller counts from offer_date (see _days_since_contact).
+        caller counts from offer_date (see days_since_contact).
     max_stage_overdue_days
         Days past due for the most overdue still-open candidate_stages row;
         0 when nothing is overdue.
@@ -252,9 +252,14 @@ def _raw_score(
 # ---------------------------------------------------------------------------
 
 
-def _days_since_contact(candidate: Candidate, today: date) -> int:
+def days_since_contact(candidate: Candidate, today: date) -> int:
     """Never-contacted candidates count silence from offer_date — the clock
-    starts when we made them an offer, not when we first bothered to call."""
+    starts when we made them an offer, not when we first bothered to call.
+
+    Public because Module 6's sweep puts this number in the title of the
+    action it creates ("silent 11 days"), and a queue that counts silence
+    differently from the badge beside it is a bug waiting to be reported.
+    """
     if candidate.last_interaction_at is None:
         return max(0, (today - candidate.offer_date).days)
     return max(0, (today - candidate.last_interaction_at.date()).days)
@@ -349,13 +354,13 @@ def rule_floor(
     the candidate record. The single place the three rule inputs are derived
     from ORM objects."""
     days_to_joining = (candidate.joining_date - today).days
-    days_since_contact = _days_since_contact(candidate, today)
+    silent_days = days_since_contact(candidate, today)
     overdue = _max_stage_overdue_days(stages, today)
     blocker_signal = resolve_blocker_signal(interactions, today)
 
     score, level = compute_base_risk(
         days_to_joining=days_to_joining,
-        days_since_contact=days_since_contact,
+        days_since_contact=silent_days,
         max_stage_overdue_days=overdue,
         blocker_signal=blocker_signal,
     )
@@ -363,7 +368,7 @@ def rule_floor(
         score=score,
         level=level,
         days_to_joining=days_to_joining,
-        days_since_contact=days_since_contact,
+        days_since_contact=silent_days,
         max_stage_overdue_days=overdue,
         blocker_signal=blocker_signal,
     )

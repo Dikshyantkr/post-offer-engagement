@@ -19,11 +19,32 @@ instead of silently polluting the seeded data.
 
 from __future__ import annotations
 
-import pytest
-from fastapi.testclient import TestClient
+import os
 
-from app.main import app
-from tests.helpers import API, candidate_payload, purge_candidates, row_counts
+# Set before any `app.*` import, because pydantic-settings reads the
+# environment once, when app.config is first imported. The TestClient below
+# runs the real FastAPI lifespan, which would otherwise start APScheduler and
+# let a background thread fire real sweeps — creating follow-up actions no
+# test asked for, spending provider quota, and tripping the row-leak guard.
+os.environ.setdefault("RUN_SCHEDULER", "false")
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.config import settings  # noqa: E402
+from app.main import app  # noqa: E402
+from app.routers.ai import get_llm_provider  # noqa: E402
+from tests.helpers import (  # noqa: E402
+    API,
+    FakeProvider,
+    candidate_payload,
+    purge_candidates,
+    row_counts,
+)
+
+assert not settings.run_scheduler, (
+    "RUN_SCHEDULER must be false for the test run — see the note above."
+)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -71,3 +92,22 @@ def make_candidate(client: TestClient, recruiter_id: str):
 
     yield _make
     purge_candidates(created)
+
+
+@pytest.fixture
+def use_provider():
+    """Swap the LLM provider for the duration of one test via FastAPI's
+    dependency_overrides — the real GeminiProvider is never constructed, and
+    no test in this suite reaches the Gemini API.
+
+    Shared by the Module 5 engine tests and the Module 6 sweep tests, which is
+    why it lives here rather than in either module.
+    """
+
+    def _use(*responses: str | Exception) -> FakeProvider:
+        provider = FakeProvider(*responses)
+        app.dependency_overrides[get_llm_provider] = lambda: provider
+        return provider
+
+    yield _use
+    app.dependency_overrides.pop(get_llm_provider, None)

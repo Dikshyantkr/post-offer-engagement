@@ -14,7 +14,7 @@ import random
 from datetime import date, datetime, time, timedelta, timezone
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.db import Base, SessionLocal, engine
 from app.enums import (
@@ -397,6 +397,22 @@ HIGH_RISK_CANDIDATES = [
 # they aren't created a second time under a different email.
 ROUTINE_INDEX_SKIP = {0, 5, 8, 22, 35, 39}
 
+# How many trailing already-due stages to leave PENDING, per stalled candidate.
+# One entry per candidate, so four candidates stall: two of them badly.
+#
+# Kept deliberately small. Enough that Module 6's stage_stall rule has real
+# input and Module 8's pipeline drop-off is not uniformly zero; few enough that
+# those drop-off numbers still describe the journey rather than describing this
+# fixture. Stalls also feed the risk engine's stage-lag component, so a larger
+# number would quietly inflate the high-risk count and make the risk
+# distribution an artefact of the seed.
+STAGE_STALL_PLAN: list[int] = [2, 2, 1, 1]
+
+# A candidate needs this many already-due stages before stalling some of them
+# leaves a coherent history — at least one completed stage behind the stall, so
+# engagement_status still resolves to something that happened.
+MIN_DUE_STAGES_TO_STALL = 3
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -658,6 +674,81 @@ def _generate_routine_candidate(
     # keep those defaults, which is correct: "will they show up?" is settled.
 
 
+def apply_stage_stalls(db: Session) -> list[tuple[str, int, int]]:
+    """Leave a few pending candidates with overdue, still-pending stages.
+
+    Without this the seed produces a database in which no stage is ever late:
+    _materialise_stages completes every stage whose due date has passed, so the
+    earliest pending due date is always in the future. That is not how
+    onboarding works. Recruiters miss steps — the manager introduction nobody
+    booked, the relocation call nobody made — and a fixture where the company
+    is never late hides the exact condition Module 6's stage_stall rule exists
+    to surface, and flatters Module 8's pipeline drop-off to zero.
+
+    Applied to routine candidates only. The hand-written high-risk specs have
+    authored stage histories that belong to their narratives.
+
+    Idempotent, like the rest of the seed: candidates are selected by a stable
+    ordering and the stages chosen are the trailing already-due ones, which are
+    the same stages on a re-run. Seeding twice stalls the same stages twice.
+
+    Returns (candidate name, stages stalled, days the worst one is overdue) for
+    the seed's own output.
+    """
+    high_risk_emails = {
+        f"{spec['name'].lower().replace(' ', '.')}@example.com" for spec in HIGH_RISK_CANDIDATES
+    }
+
+    candidates = db.scalars(
+        select(Candidate)
+        .where(Candidate.final_outcome == FinalOutcome.PENDING)
+        .order_by(Candidate.email)
+        .options(selectinload(Candidate.stages).selectinload(CandidateStage.stage))
+    ).all()
+
+    # Strictly before today: a stage due today is not yet late, and the risk
+    # engine's stage-lag rule uses the same boundary.
+    eligible: list[tuple[Candidate, list[CandidateStage]]] = []
+    for candidate in candidates:
+        if candidate.email in high_risk_emails:
+            continue
+        due = sorted(
+            (cs for cs in candidate.stages if cs.due_date < NOW),
+            key=lambda cs: cs.due_date,
+        )
+        if len(due) >= MIN_DUE_STAGES_TO_STALL:
+            eligible.append((candidate, due))
+
+    # Spread the picks across the eligible list rather than taking the first
+    # few. `candidates` is ordered by email for reproducibility, so taking a
+    # prefix would stall four adjacent names — an artefact a reviewer notices
+    # immediately in the action queue. A stride keeps the selection
+    # deterministic (and stable across a re-seed, which random.sample would
+    # not be: re-seeding skips the generation path and leaves the RNG in a
+    # different state).
+    stride = max(1, len(eligible) // len(STAGE_STALL_PLAN)) if eligible else 1
+    chosen = eligible[::stride][: len(STAGE_STALL_PLAN)]
+
+    stalled: list[tuple[str, int, int]] = []
+    for (candidate, due), count in zip(chosen, STAGE_STALL_PLAN):
+        # The trailing due stages — the frontier the recruiter fell behind on,
+        # rather than a gap in the distant past they have since worked around.
+        for candidate_stage in due[-count:]:
+            candidate_stage.status = StageStatus.PENDING
+            candidate_stage.completed_at = None
+            candidate_stage.completed_by = None
+
+        # engagement_status is derived from the furthest-along completed stage,
+        # so un-completing the frontier has to walk it back. Same resolver the
+        # API uses, so a stalled candidate looks exactly like one who never got
+        # that far.
+        candidate.engagement_status = resolve_engagement_status(candidate.stages)
+
+        stalled.append((candidate.name, count, (NOW - due[-count].due_date).days))
+
+    return stalled
+
+
 def main() -> None:
     Base.metadata.create_all(bind=engine)
 
@@ -683,6 +774,11 @@ def main() -> None:
             routine_count += 1
         db.commit()
 
+        # Before the risk pass, so the stage lag these create is scored by the
+        # same rules as everything else rather than bolted on afterwards.
+        stalled = apply_stage_stalls(db)
+        db.commit()
+
         # One definition of risk in the codebase: the seed scores its
         # candidates through the same rule engine the API and the nightly
         # sweep use, rather than a second heuristic that drifts from it.
@@ -693,6 +789,10 @@ def main() -> None:
               f"({high_risk_count} hand-written high-risk specs, {routine_count} generated).")
         print(f"Risk scored via risk_service: {risk['scanned']} pending candidates, "
               f"distribution {risk['distribution']}.")
+        print(f"Stage stalls seeded for {len(stalled)} candidates "
+              f"(feeds the stage_stall automation rule and pipeline drop-off):")
+        for name, count, worst_overdue in stalled:
+            print(f"  - {name}: {count} stage(s) pending, worst {worst_overdue} days overdue")
 
 
 if __name__ == "__main__":

@@ -19,144 +19,19 @@ their analyses are untouched (see conftest's _no_row_leaks guard).
 
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import date, timedelta
 
 import pytest
 from sqlalchemy import select
 
-from app.ai.provider import LLMProvider
 from app.db import SessionLocal
 from app.enums import RiskLevel, RiskSource, ValidationStatus
 from app.errors import LLMProviderError
-from app.main import app
 from app.models import AIAnalysis, AuditLog, Candidate
-from app.routers.ai import get_llm_provider
-from tests.helpers import API
+from tests.helpers import API, draft_json, next_action_json, risk_json, summary_json
 
 TODAY = date.today()
-
-
-# ---------------------------------------------------------------------------
-# The fake provider
-# ---------------------------------------------------------------------------
-
-
-class ProviderCalledTooOften(BaseException):
-    """Deliberately a BaseException, not an Exception.
-
-    The engine catches Exception around every provider call and degrades to
-    its fallback — correct behaviour, and it would silently swallow this and
-    hide the exact thing the repair tests exist to assert. A BaseException
-    escapes the engine and fails the test loudly.
-    """
-
-
-class FakeProvider(LLMProvider):
-    """Returns queued responses in order. An `Exception` in the queue is
-    raised instead of returned, so provider failures are expressed the same
-    way as provider successes.
-
-    Running past the end of the queue is an error, not a repeat: "exactly one
-    repair attempt" is only a real assertion if a third call fails.
-    """
-
-    name = "fake"
-
-    def __init__(self, *responses: str | Exception, model_name: str = "fake-model-1") -> None:
-        self.model_name = model_name
-        self._responses = list(responses)
-        self.prompts: list[str] = []
-        self.schemas: list[dict] = []
-
-    @property
-    def call_count(self) -> int:
-        return len(self.prompts)
-
-    def generate_json(self, prompt: str, schema_hint: dict) -> tuple[str, int]:
-        index = len(self.prompts)
-        self.prompts.append(prompt)
-        self.schemas.append(schema_hint)
-
-        if index >= len(self._responses):
-            raise ProviderCalledTooOften(
-                f"provider called {index + 1} times, but only {len(self._responses)} "
-                "responses were queued"
-            )
-
-        response = self._responses[index]
-        if isinstance(response, Exception):
-            raise response
-        return response, 7
-
-
-@pytest.fixture
-def use_provider():
-    """Swap the provider for the duration of one test via FastAPI's
-    dependency_overrides — the real GeminiProvider is never constructed."""
-    installed: list[FakeProvider] = []
-
-    def _use(*responses: str | Exception) -> FakeProvider:
-        provider = FakeProvider(*responses)
-        app.dependency_overrides[get_llm_provider] = lambda: provider
-        installed.append(provider)
-        return provider
-
-    yield _use
-    app.dependency_overrides.pop(get_llm_provider, None)
-
-
-# ---------------------------------------------------------------------------
-# Payload builders
-# ---------------------------------------------------------------------------
-
-
-def risk_json(level: str = "high", **overrides) -> str:
-    payload = {
-        "risk_level": level,
-        "confidence": 0.82,
-        "signals": ['"they\'ve called me in for a chat tomorrow"'],
-        "reasoning": "Current employer initiated a conversation immediately after she resigned.",
-        "concern_category": "counter_offer",
-    }
-    payload.update(overrides)
-    return json.dumps(payload)
-
-
-def summary_json(**overrides) -> str:
-    payload = {
-        "summary": "Two outbound check-ins, one inbound reply flagging a meeting with her employer.",
-        "key_concerns": ["Possible counter-offer"],
-        "sentiment": "concerned",
-        "unresolved_items": ["Outcome of the meeting with her current employer"],
-    }
-    payload.update(overrides)
-    return json.dumps(payload)
-
-
-def next_action_json(**overrides) -> str:
-    payload = {
-        "action_type": "schedule_call",
-        "channel": "call",
-        "urgency": "high",
-        "rationale": "A counter-offer conversation needs a call, not a message.",
-        "suggested_timing_days": 0,
-    }
-    payload.update(overrides)
-    return json.dumps(payload)
-
-
-def draft_json(**overrides) -> str:
-    payload = {
-        "channel": "email",
-        "subject": "Checking in before your start date",
-        "body": "Hi Sana, hope the handover is going smoothly. Do you have time for a quick call?",
-        "tone": "warm",
-        "personalization_used": ["first name", "notice period"],
-    }
-    payload.update(overrides)
-    return json.dumps(payload)
 
 
 # ---------------------------------------------------------------------------

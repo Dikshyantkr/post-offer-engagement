@@ -421,6 +421,32 @@ class AIOverrideResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Automation (Module 6)
+# ---------------------------------------------------------------------------
+
+
+class AutomationRuleOutcome(BaseModel):
+    # `matched` counts candidates, not matching rows: one candidate with three
+    # overdue stages is one stalled candidate and gets one action, because the
+    # idempotency key is candidate + rule_key.
+    matched: int
+    actions_created: int
+    skipped_existing_action: int
+
+
+class AutomationRunResponse(BaseModel):
+    started_at: datetime
+    duration_ms: int
+    candidates_scanned: int
+    actions_created: int
+    rules: dict[str, AutomationRuleOutcome]
+    ai_calls: int
+    ai_fallbacks: int
+    messages_simulated: int
+    errors: int
+
+
+# ---------------------------------------------------------------------------
 # Candidate detail (GET /candidates/{id}) — candidate + stages + interactions
 # + latest AI analysis + open actions, per CLAUDE.md Module 2.
 # ---------------------------------------------------------------------------
