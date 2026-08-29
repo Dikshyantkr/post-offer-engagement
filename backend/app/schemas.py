@@ -313,6 +313,20 @@ class FollowUpActionListResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Risk engine (Module 4)
+# ---------------------------------------------------------------------------
+
+
+class RiskRecomputeResponse(BaseModel):
+    scanned: int
+    score_updated: int
+    level_changed: int
+    skipped_hr_override: int
+    skipped_ai_higher: int
+    distribution: dict[str, int]
+
+
+# ---------------------------------------------------------------------------
 # Candidate detail (GET /candidates/{id}) — candidate + stages + interactions
 # + latest AI analysis + open actions, per CLAUDE.md Module 2.
 # ---------------------------------------------------------------------------

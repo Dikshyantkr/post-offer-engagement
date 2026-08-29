@@ -73,6 +73,23 @@ class BlockerCategory(str, Enum):
     NONE = "none"
 
 
+class BlockerSignal(str, Enum):
+    """Severity of the structured concern a recruiter captured on a call note.
+
+    Derived from interactions.blocker_raised / blocker_category /
+    recruiter_read and fed into the risk rule floor. Ordered least to most
+    severe; see risk_service.BLOCKER_SIGNAL_RANK.
+
+    This is deterministic and human-tagged — the recruiter already told us
+    what the blocker was. It needs no AI to read.
+    """
+
+    NONE = "none"
+    UNSURE = "unsure"  # recruiter_read='unsure' — nudge only, never a band change
+    CONCERN = "concern"  # a blocker was raised, or recruiter_read='worried'
+    CRITICAL = "critical"  # counter_offer or notice_period blocker
+
+
 class ValidationStatus(str, Enum):
     VALID = "valid"
     REPAIRED = "repaired"

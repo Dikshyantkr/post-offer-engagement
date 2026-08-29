@@ -24,12 +24,12 @@ from app.enums import (
     InteractionChannel,
     InteractionDirection,
     RecruiterRead,
-    RiskLevel,
     RiskSource,
     StageAnchor,
     StageStatus,
 )
 from app.models import Candidate, CandidateStage, Interaction, JourneyStage, Recruiter
+from app.services import risk_service
 from app.services.stage_scheduler import compute_stage_schedule
 from app.services.stage_service import resolve_engagement_status
 
@@ -121,7 +121,6 @@ HIGH_RISK_CANDIDATES = [
         "recruiter_email": "priya.nair@company.com",
         "notice_days": 60,
         "days_to_joining": 9,
-        "risk_score_base": 78,
         "notes": "Relocation to Pune still unresolved this close to joining. Follow up on housing.",
         "interactions": [
             ("outbound", "whatsapp", -18, "Hi Ritika, just checking in on how the move to Pune is coming along. Anything we can help with?"),
@@ -140,7 +139,6 @@ HIGH_RISK_CANDIDATES = [
         "recruiter_email": "devraj.singh@company.com",
         "notice_days": 90,
         "days_to_joining": 25,
-        "risk_score_base": 65,
         "notes": "Current employer disputing relieving date. Watch this one — 90-day notice buys some slack but escalate if unresolved past next check-in.",
         "interactions": [
             ("outbound", "email", -20, "Hi Aditya, hope the transition is going well. How's the handover on your current project shaping up?"),
@@ -161,7 +159,6 @@ HIGH_RISK_CANDIDATES = [
         "recruiter_email": "meera.iyer@company.com",
         "notice_days": 30,
         "days_to_joining": 6,
-        "risk_score_base": 82,
         "notes": "Mentioned current company called her in for a conversation right after resigning. Classic counter-offer pattern — prioritise this call.",
         "interactions": [
             ("outbound", "whatsapp", -10, "Hi Sana, excited to have you join the data team soon! Let us know if you need anything before your start date."),
@@ -180,7 +177,6 @@ HIGH_RISK_CANDIDATES = [
         "recruiter_email": "karan.mehta@company.com",
         "notice_days": 60,
         "days_to_joining": 14,
-        "risk_score_base": 55,
         "notes": "Hedging on compensation — 'should be fine' language while waiting on his current company's counter.",
         "interactions": [
             ("outbound", "email", -21, "Hi Vikram, looking forward to having you lead the platform team. How's the notice period going?"),
@@ -197,7 +193,6 @@ HIGH_RISK_CANDIDATES = [
         "recruiter_email": "farhan.sheikh@company.com",
         "notice_days": 90,
         "days_to_joining": 40,
-        "risk_score_base": 48,
         "notes": "Vague hedging about role scope after the team intro call — 'probably just how it was explained'. Worth a clarifying conversation.",
         "interactions": [
             ("outbound", "email", -30, "Hi Neha, setting up an intro call with the design team so you get a feel for the day-to-day work."),
@@ -223,7 +218,6 @@ HIGH_RISK_CANDIDATES = [
         "recruiter_email": "ananya.rao@company.com",
         "notice_days": 30,
         "days_to_joining": 5,
-        "risk_score_base": 88,
         "notes": "Gone completely silent with joining days away. No replies to last three outreach attempts.",
         "interactions": [
             ("outbound", "email", -22, "Hi Arjun, welcome aboard! Sharing the onboarding documents ahead of your start date."),
@@ -241,7 +235,6 @@ HIGH_RISK_CANDIDATES = [
         "recruiter_email": "meera.iyer@company.com",
         "notice_days": 60,
         "days_to_joining": 20,
-        "risk_score_base": 74,
         "notes": "Went dark right after the welcome email. No response since — flagging for a personal call, not another message.",
         "interactions": [
             ("outbound", "email", -30, "Hi Kavya, welcome to the team! Sharing a few documents to get started with onboarding."),
@@ -256,7 +249,6 @@ HIGH_RISK_CANDIDATES = [
         "recruiter_email": "priya.nair@company.com",
         "notice_days": 90,
         "days_to_joining": 18,
-        "risk_score_base": 60,
         "notes": "Family emergency raised directly by the candidate. Give him space but keep a light touch check-in scheduled.",
         "interactions": [
             ("inbound", "whatsapp", -8,
@@ -277,7 +269,6 @@ HIGH_RISK_CANDIDATES = [
         "recruiter_email": "farhan.sheikh@company.com",
         "notice_days": 30,
         "days_to_joining": 10,
-        "risk_score_base": 58,
         "notes": "Directly questioning the offer number against her current CTC. Needs a compensation conversation, not a generic nudge.",
         "interactions": [
             ("outbound", "email", -12, "Hi Ishita, looking forward to having you join the data team. Let us know if you have any questions before your start date."),
@@ -295,7 +286,6 @@ HIGH_RISK_CANDIDATES = [
         "recruiter_email": "devraj.singh@company.com",
         "notice_days": 60,
         "days_to_joining": 12,
-        "risk_score_base": 70,
         "notes": "Hedging around the money math out loud — hasn't said no, but hasn't committed either. Keep an eye before the notice window closes.",
         "interactions": [
             ("outbound", "whatsapp", -25, "hi aarav, congrats again on the offer! sharing the onboarding checklist below, let us know if anything's unclear."),
@@ -314,7 +304,6 @@ HIGH_RISK_CANDIDATES = [
         "recruiter_email": "ananya.rao@company.com",
         "notice_days": 90,
         "days_to_joining": 30,
-        "risk_score_base": 68,
         "notes": "Quietly unsure about what the role actually involves day-to-day. Worth a clarifying call before he second-guesses further.",
         "interactions": [
             ("outbound", "email", -20, "hi arnav, sharing the role brief and some docs from the team ahead of your start date."),
@@ -332,7 +321,6 @@ HIGH_RISK_CANDIDATES = [
         "recruiter_email": "karan.mehta@company.com",
         "notice_days": 30,
         "days_to_joining": 7,
-        "risk_score_base": 66,
         "notes": "Family isn't fully on board with the move. Give him room but don't let this go unchecked.",
         "interactions": [
             ("inbound", "whatsapp", -5,
@@ -350,7 +338,6 @@ HIGH_RISK_CANDIDATES = [
         "recruiter_email": "meera.iyer@company.com",
         "notice_days": 60,
         "days_to_joining": 16,
-        "risk_score_base": 77,
         "notes": "Text replies read fine on the surface — the real hesitation only came out on a call. Trust the call note over the chat history here.",
         "interactions": [
             ("outbound", "whatsapp", -30, "hi kavita, welcome aboard! sharing a few documents to kick off the onboarding process."),
@@ -371,7 +358,6 @@ HIGH_RISK_CANDIDATES = [
         "recruiter_email": "priya.nair@company.com",
         "notice_days": 90,
         "days_to_joining": 22,
-        "risk_score_base": 81,
         "notes": "Was engaged early, went quiet after the manager intro. Call didn't get much more out of her either — flag for a second, more direct conversation.",
         "interactions": [
             ("outbound", "email", -40, "hi neelam, excited to have you on the team! sharing the welcome documents to get things started."),
@@ -393,7 +379,6 @@ HIGH_RISK_CANDIDATES = [
         "recruiter_email": "farhan.sheikh@company.com",
         "notice_days": 30,
         "days_to_joining": 9,
-        "risk_score_base": 72,
         "notes": "Replies have been getting shorter each time we check in. Nothing said outright, but the trend itself is the signal.",
         "interactions": [
             ("outbound", "whatsapp", -19, "hi yash, congrats again on the offer! sharing the onboarding checklist, let us know if you have questions."),
@@ -495,14 +480,6 @@ def _resolve_pending_engagement_status(candidate: Candidate) -> EngagementStatus
     return resolve_engagement_status(candidate.stages)
 
 
-def _risk_level_for_score(score: float) -> RiskLevel:
-    if score >= 65:
-        return RiskLevel.HIGH
-    if score >= 35:
-        return RiskLevel.MEDIUM
-    return RiskLevel.LOW
-
-
 def _add_interaction(
     candidate: Candidate,
     recruiter: Recruiter,
@@ -555,9 +532,7 @@ def _create_high_risk_candidate(
         joining_date=joining_date,
         recruiter=recruiter,
         final_outcome=FinalOutcome.PENDING,
-        risk_level=_risk_level_for_score(spec["risk_score_base"]),
         risk_source=RiskSource.RULE,
-        risk_score_base=float(spec["risk_score_base"]),
         notes=spec["notes"],
     )
     db.add(candidate)
@@ -677,18 +652,10 @@ def _generate_routine_candidate(
             last_occurred = occurred_at
 
     candidate.last_interaction_at = last_occurred
-
-    if outcome == FinalOutcome.JOINED:
-        base_score = random.uniform(5, 25)
-    elif outcome == FinalOutcome.DROPPED_OUT:
-        base_score = random.uniform(60, 90)
-    else:
-        days_to_join = (joining_date - NOW).days
-        days_since_contact = (NOW - last_occurred.date()).days if last_occurred else 999
-        base_score = min(100.0, days_since_contact * 2.5 + max(0, 14 - days_to_join) * 3)
-
-    candidate.risk_score_base = round(base_score, 1)
-    candidate.risk_level = _risk_level_for_score(base_score)
+    # risk_level / risk_score_base are left at their column defaults here and
+    # filled in by the single risk_service.recompute_all() pass in main().
+    # Resolved candidates (joined / dropped_out) are excluded from scoring and
+    # keep those defaults, which is correct: "will they show up?" is settled.
 
 
 def main() -> None:
@@ -716,9 +683,16 @@ def main() -> None:
             routine_count += 1
         db.commit()
 
+        # One definition of risk in the codebase: the seed scores its
+        # candidates through the same rule engine the API and the nightly
+        # sweep use, rather than a second heuristic that drifts from it.
+        risk = risk_service.recompute_all(db, today=NOW, actor="seed", record_audit=False)
+
         count = len(db.scalars(select(Candidate)).all())
         print(f"Seed complete. {count} candidates in database "
               f"({high_risk_count} hand-written high-risk specs, {routine_count} generated).")
+        print(f"Risk scored via risk_service: {risk['scanned']} pending candidates, "
+              f"distribution {risk['distribution']}.")
 
 
 if __name__ == "__main__":

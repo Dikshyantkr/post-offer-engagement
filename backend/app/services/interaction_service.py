@@ -6,7 +6,7 @@ in between, so the two are always consistent.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.errors import NotFoundError
 from app.models import Candidate, Interaction
 from app.schemas import InteractionCreate
+from app.services import risk_service
 
 
 def list_interactions(
@@ -55,6 +56,15 @@ def create_interaction(
 
     if candidate.last_interaction_at is None or occurred_at > candidate.last_interaction_at:
         candidate.last_interaction_at = occurred_at
+
+    # The session runs with autoflush=False, so the new interaction must be
+    # flushed before the recompute's SELECT can see it — otherwise a call note
+    # logging a counter-offer would not raise risk until the next sweep.
+    db.flush()
+
+    # Same transaction as the interaction write: logging contact immediately
+    # reflects in the candidate's risk, and the two can never disagree.
+    risk_service.recompute_for_candidate(db, candidate, date.today(), actor)
 
     db.commit()
     db.refresh(interaction)
