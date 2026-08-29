@@ -16,7 +16,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.enums import EngagementStatus, FollowUpStatus, RiskLevel, RiskSource
-from app.errors import NotFoundError
+from app.errors import ConfigurationError, NotFoundError
 from app.models import Candidate, CandidateStage, JourneyStage, Recruiter
 from app.schemas import (
     CandidateCreate,
@@ -113,6 +113,12 @@ def create_candidate(db: Session, payload: CandidateCreate) -> Candidate:
             .order_by(JourneyStage.sequence_order)
         )
     )
+    if not stages:
+        raise ConfigurationError(
+            "No active journey_stages are configured, so the candidate's stage "
+            "timeline cannot be materialised. Seed the journey_stages template first."
+        )
+
     schedule = compute_stage_schedule(candidate.offer_date, candidate.joining_date, stages)
     stage_by_key = {s.key: s for s in stages}
     for key, due_date in schedule:
@@ -163,7 +169,10 @@ def get_candidate_detail(db: Session, candidate_id: uuid.UUID) -> CandidateDetai
 
 
 def _reschedule_stages(db: Session, candidate: Candidate) -> None:
-    all_stages = list(db.scalars(select(JourneyStage)))
+    # Same is_active filter as create_candidate: an inactive stage left in the
+    # set would widen the compression window and produce different due dates
+    # here than the candidate was originally created with.
+    all_stages = list(db.scalars(select(JourneyStage).where(JourneyStage.is_active.is_(True))))
     schedule = dict(compute_stage_schedule(candidate.offer_date, candidate.joining_date, all_stages))
     stage_by_id = {s.id: s for s in all_stages}
 

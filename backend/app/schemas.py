@@ -247,7 +247,10 @@ class InteractionListResponse(BaseModel):
 
 
 class AIAnalysisResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    # protected_namespaces=() because model_name is the real column name from
+    # CLAUDE.md's ai_analyses table, not something worth renaming just to
+    # dodge Pydantic's default "model_" prefix reservation.
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
     id: uuid.UUID
     candidate_id: uuid.UUID

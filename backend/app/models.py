@@ -58,7 +58,7 @@ class Candidate(TimestampMixin, Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    email: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     phone: Mapped[str | None] = mapped_column(Text)
     role: Mapped[str] = mapped_column(Text, nullable=False)
     department: Mapped[str] = mapped_column(Text, nullable=False)

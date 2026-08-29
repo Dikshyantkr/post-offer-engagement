@@ -31,6 +31,7 @@ from app.enums import (
 )
 from app.models import Candidate, CandidateStage, Interaction, JourneyStage, Recruiter
 from app.services.stage_scheduler import compute_stage_schedule
+from app.services.stage_service import resolve_engagement_status
 
 random.seed(20260829)
 
@@ -74,19 +75,6 @@ JOURNEY_STAGE_DEFS: list[dict] = [
     dict(key="pre_joining_checkin", label="Pre-joining check-in", anchor=StageAnchor.JOINING, offset_days=-10, sequence_order=7),
     dict(key="joining", label="Joining", anchor=StageAnchor.JOINING, offset_days=0, sequence_order=8),
 ]
-
-# candidate_stages key -> candidates.engagement_status. "joining" is deliberately
-# absent: a candidate only becomes JOINED once final_outcome says so, not just
-# because the joining-stage due date arrived.
-STAGE_KEY_TO_ENGAGEMENT_STATUS: dict[str, EngagementStatus] = {
-    "offer_accepted": EngagementStatus.OFFER_ACCEPTED,
-    "welcome": EngagementStatus.WELCOME_SENT,
-    "documentation": EngagementStatus.DOCUMENTATION,
-    "manager_intro": EngagementStatus.MANAGER_INTRO,
-    "team_context": EngagementStatus.TEAM_CONTEXT,
-    "relocation_check": EngagementStatus.RELOCATION_CHECK,
-    "pre_joining_checkin": EngagementStatus.PRE_JOINING_CHECKIN,
-}
 
 FIRST_NAMES = [
     "Aarav", "Vivaan", "Aditi", "Diya", "Kabir", "Ishaan", "Ananya", "Riya", "Yash", "Tara",
@@ -502,13 +490,9 @@ def _materialise_stages(
 
 
 def _resolve_pending_engagement_status(candidate: Candidate) -> EngagementStatus:
-    completed = [cs for cs in candidate.stages if cs.status == StageStatus.COMPLETED]
-    completed.sort(key=lambda cs: cs.stage.sequence_order, reverse=True)
-    for candidate_stage in completed:
-        mapped = STAGE_KEY_TO_ENGAGEMENT_STATUS.get(candidate_stage.stage.key)
-        if mapped is not None:
-            return mapped
-    return EngagementStatus.OFFER_ACCEPTED
+    # Delegates to the same resolver the API uses, so a seeded candidate and
+    # one advanced through POST /stages/{id}/complete agree on the rules.
+    return resolve_engagement_status(candidate.stages)
 
 
 def _risk_level_for_score(score: float) -> RiskLevel:

@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,20 @@ class NotFoundError(AppError):
 class BadStateTransitionError(AppError):
     status_code = status.HTTP_400_BAD_REQUEST
     code = "bad_state_transition"
+
+
+class ConflictError(AppError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "conflict"
+
+
+class ConfigurationError(AppError):
+    """Server-side data the app depends on is missing or unusable — e.g. the
+    journey_stages template was never seeded. A 500 is correct: the client's
+    request was fine, the deployment is not."""
+
+    status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+    code = "configuration_error"
 
 
 class LLMProviderError(AppError):
@@ -74,6 +89,22 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content=_envelope("http_error", str(exc.detail), None),
+        )
+
+    @app.exception_handler(IntegrityError)
+    async def handle_integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
+        # Logged in full server-side; the client gets the shape of the problem
+        # without the SQL, constraint names, or parameter values.
+        logger.warning(
+            "Integrity error on %s %s: %s", request.method, request.url.path, exc.orig
+        )
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content=_envelope(
+                "conflict",
+                "The request conflicts with an existing record.",
+                None,
+            ),
         )
 
     @app.exception_handler(Exception)

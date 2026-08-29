@@ -96,3 +96,23 @@ class FollowUpSource(str, Enum):
     AUTOMATION = "automation"
     AI = "ai"
     MANUAL = "manual"
+
+
+# journey_stages.key -> candidates.engagement_status.
+#
+# Single source of truth, shared by seed.py and stage_service so completing a
+# stage through the API lands a candidate on the same engagement_status the
+# seed would have given them.
+#
+# "joining" is deliberately absent: a candidate becomes JOINED because
+# final_outcome says so, not merely because the joining stage's due date
+# arrived and someone ticked it off.
+STAGE_KEY_TO_ENGAGEMENT_STATUS: dict[str, EngagementStatus] = {
+    "offer_accepted": EngagementStatus.OFFER_ACCEPTED,
+    "welcome": EngagementStatus.WELCOME_SENT,
+    "documentation": EngagementStatus.DOCUMENTATION,
+    "manager_intro": EngagementStatus.MANAGER_INTRO,
+    "team_context": EngagementStatus.TEAM_CONTEXT,
+    "relocation_check": EngagementStatus.RELOCATION_CHECK,
+    "pre_joining_checkin": EngagementStatus.PRE_JOINING_CHECKIN,
+}
