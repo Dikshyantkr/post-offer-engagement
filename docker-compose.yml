@@ -43,14 +43,19 @@ services:
     command: sh -c "python seed.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
   web:
-    # Module 7. Behind a profile until ./frontend exists, so `docker compose up`
-    # brings up db + api cleanly instead of failing on a missing build context.
-    # Once the frontend lands, drop this line to put it back in the default set.
-    profiles: ["frontend"]
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        # Inlined into the browser bundle at build time — see frontend/Dockerfile.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      # Two base URLs because the same code runs in two places. Server
+      # Components execute inside this container and reach the API by its
+      # compose service name; the browser cannot resolve `api` and must use the
+      # port published on the host.
+      API_URL_INTERNAL: http://api:8000/api/v1
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
     depends_on:
       - api
     ports:

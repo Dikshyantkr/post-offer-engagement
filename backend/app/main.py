@@ -3,6 +3,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app import models  # noqa: F401  (registers models on Base.metadata)
 from app.config import settings
@@ -50,6 +51,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(title="Post-Offer Engagement Platform", lifespan=lifespan)
+
+# Module 7's dashboard and every AI mutation run in the browser, which loads
+# the app from :3000 and calls this API on :8000 — a different origin. Without
+# this the browser blocks every one of those calls before they leave the page,
+# and the frontend shows empty tables with errors only in the devtools console.
+#
+# The allowed origins are configurable and default to the local Next.js dev and
+# container ports. X-Actor has to be in allow_headers explicitly: it is not a
+# CORS-safelisted header, so the recruiter switcher would otherwise fail
+# preflight on exactly the mutating requests that need it.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Actor"],
+)
+
 register_exception_handlers(app)
 
 API_V1_PREFIX = "/api/v1"

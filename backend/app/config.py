@@ -29,6 +29,16 @@ class Settings(BaseSettings):
     sweep_hour: int = 2
     sweep_minute: int = 0
 
+    # --- Frontend (Module 7) ------------------------------------------------
+    # Comma-separated browser origins allowed to call this API. The frontend is
+    # served from a different port than the API, so every call it makes is
+    # cross-origin.
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
