@@ -421,6 +421,78 @@ class AIOverrideResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Analytics (Module 8)
+#
+# Every ratio is Optional. A denominator of zero is a real state here — a
+# recruiter whose candidates are all still pending has no conversion rate —
+# and null says that, where 0.0 would claim they lost everyone.
+# ---------------------------------------------------------------------------
+
+
+class AnalyticsOverviewResponse(BaseModel):
+    total_offered: int
+    joined: int
+    dropped_out: int
+    pending: int
+    # Denominator is resolved candidates only (joined + dropped_out); null
+    # when nothing has resolved. See analytics_service._conversion_pct.
+    offer_to_join_conversion_pct: float | None
+    # Pending candidates only, and forward-looking: a start date that has
+    # already passed is not "joining in the next 7 days".
+    joining_next_7_days: int
+    joining_next_15_days: int
+    joining_next_30_days: int
+    high_risk_count: int
+    medium_risk_count: int
+    # Mean gap between consecutive interactions, averaged over pending
+    # candidates that have at least two; null when none do.
+    avg_days_between_interactions: float | None
+    open_follow_up_actions: int
+
+
+class PipelineStageStats(BaseModel):
+    stage_key: str
+    stage_label: str
+    sequence_order: int
+    # Counts of candidate_stages rows, across all candidates.
+    completed: int
+    pending: int
+    # Pending, past due, and belonging to a still-pending candidate — the same
+    # predicate as Module 6's stage_stall rule.
+    stalled: int
+    # Count of CANDIDATES whose furthest completed stage was this one and who
+    # then dropped out. Not comparable to the columns above, which count rows.
+    drop_off: int
+
+
+class AnalyticsPipelineResponse(BaseModel):
+    items: list[PipelineStageStats]
+    total_dropped_out: int
+    # Dropped out having completed nothing, so attributable to no stage.
+    # Reported rather than folded into stage 1, which would overstate it.
+    dropped_out_before_any_stage: int
+
+
+class RecruiterStats(BaseModel):
+    recruiter_id: uuid.UUID
+    recruiter_name: str
+    total_offers: int
+    joined: int
+    dropped_out: int
+    pending_count: int
+    conversion_pct: float | None
+    high_risk_count: int
+    avg_days_since_last_contact: float | None
+
+
+class AnalyticsRecruitersResponse(BaseModel):
+    # No pagination envelope, unlike the Module 2 list endpoints. These are
+    # aggregates over a bounded set — one row per recruiter, one per journey
+    # stage — and a paged funnel is not a funnel.
+    items: list[RecruiterStats]
+
+
+# ---------------------------------------------------------------------------
 # Automation (Module 6)
 # ---------------------------------------------------------------------------
 

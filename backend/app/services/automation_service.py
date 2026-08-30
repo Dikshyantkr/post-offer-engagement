@@ -215,7 +215,9 @@ def _imminent_silence_candidates(db: Session, now: datetime) -> list[Candidate]:
         db.scalars(
             select(Candidate).where(
                 Candidate.final_outcome == FinalOutcome.PENDING,
-                Candidate.joining_date <= now.date() + timedelta(days=JOINING_HORIZON_DAYS),
+                risk_service.joining_within(
+                    now.date(), JOINING_HORIZON_DAYS, include_overdue=True
+                ),
                 or_(
                     Candidate.last_interaction_at <= now - timedelta(days=SILENCE_DAYS),
                     Candidate.last_interaction_at.is_(None),

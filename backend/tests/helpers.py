@@ -80,7 +80,15 @@ def unique_email(prefix: str = "test") -> str:
     return f"{prefix}.{uuid.uuid4().hex[:10]}@example.com"
 
 
-def candidate_payload(recruiter_id: str, **overrides) -> dict:
+def candidate_payload(default_recruiter_id: str, **overrides) -> dict:
+    """Build a valid POST /candidates body.
+
+    The positional argument is named `default_recruiter_id` rather than
+    `recruiter_id` so that `recruiter_id=...` can be passed as an override —
+    with the obvious name it collides with the positional parameter and raises
+    TypeError before the function body runs, which makes it impossible to
+    create a candidate under a specific recruiter.
+    """
     offer_date = date.today() - timedelta(days=10)
     payload = {
         "name": "Test Candidate",
@@ -90,7 +98,7 @@ def candidate_payload(recruiter_id: str, **overrides) -> dict:
         "location": "Bengaluru",
         "offer_date": offer_date.isoformat(),
         "joining_date": (offer_date + timedelta(days=60)).isoformat(),
-        "recruiter_id": recruiter_id,
+        "recruiter_id": default_recruiter_id,
     }
     payload.update(overrides)
     return payload

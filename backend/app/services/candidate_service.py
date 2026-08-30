@@ -107,11 +107,7 @@ def list_candidates(
         )
 
     if joining_within_days is not None:
-        today = date.today()
-        stmt = stmt.where(
-            Candidate.joining_date >= today,
-            Candidate.joining_date <= today + timedelta(days=joining_within_days),
-        )
+        stmt = stmt.where(risk_service.joining_within(date.today(), joining_within_days))
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 

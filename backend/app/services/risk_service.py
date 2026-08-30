@@ -22,8 +22,9 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.enums import (
     BlockerCategory,
@@ -399,6 +400,33 @@ def rule_floor_for_candidate(db: Session, candidate: Candidate, today: date) -> 
     """rule_floor(), loading the candidate's stages and recent interactions."""
     stages, interactions = _load_rule_inputs(db, candidate, today)
     return rule_floor(candidate, stages, interactions, today)
+
+
+def joining_within(
+    today: date, days: int, *, include_overdue: bool = False
+) -> ColumnElement[bool]:
+    """SQL predicate for "joining within N days".
+
+    One definition, three callers — the dashboard's joining_within_days filter,
+    Module 6's imminent_silence rule, and Module 8's joining_next_N counts.
+    Written independently in each place, they would drift, and "joining within
+    7 days" quietly meaning two different things across the app is a bug, not a
+    rounding difference.
+
+    `include_overdue` is the one real difference, made explicit rather than
+    left to an omitted line. Automation passes True: a pending candidate whose
+    start date came and went is the most alarming row in the table and must not
+    fall out of the query that decides who gets called. Analytics and the
+    dashboard filter pass False, because "joining in the next 7 days" is a
+    forward-looking count and someone whose date passed two months ago is not
+    part of it.
+
+    Both bounds are inclusive.
+    """
+    upper = Candidate.joining_date <= today + timedelta(days=days)
+    if include_overdue:
+        return upper
+    return and_(Candidate.joining_date >= today, upper)
 
 
 def is_higher(level: RiskLevel, than: RiskLevel) -> bool:

@@ -10,6 +10,7 @@ from app.db import Base, engine
 from app.errors import register_exception_handlers
 from app.routers import (
     ai,
+    analytics,
     automation,
     candidates,
     follow_up_actions,
@@ -60,6 +61,7 @@ app.include_router(follow_up_actions.router, prefix=API_V1_PREFIX)
 app.include_router(risk.router, prefix=API_V1_PREFIX)
 app.include_router(ai.router, prefix=API_V1_PREFIX)
 app.include_router(automation.router, prefix=API_V1_PREFIX)
+app.include_router(analytics.router, prefix=API_V1_PREFIX)
 
 
 @app.get("/health")
